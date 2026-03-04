@@ -46,14 +46,46 @@ OBSERVADORES = {
 
 # Produtos disponiveis
 PRODUTOS_CATALOGO: list[dict] = [
-    {"id": 1, "nome": "Notebook Dell Inspiron", "preco": 3599.90},
-    {"id": 2, "nome": "Mouse Wireless Logitech", "preco": 129.90},
-    {"id": 3, "nome": "Teclado Mecanico Redragon", "preco": 289.90},
-    {"id": 4, "nome": 'Monitor LED 24" Samsung', "preco": 899.90},
-    {"id": 5, "nome": "Headset Gamer HyperX", "preco": 349.90},
-    {"id": 6, "nome": "Webcam Logitech C920", "preco": 429.90},
-    {"id": 7, "nome": "SSD 1TB Kingston", "preco": 399.90},
-    {"id": 8, "nome": "Memoria RAM 16GB", "preco": 289.90},
+    # Computadores e Notebooks
+    {"id": 1, "nome": "Notebook Dell Inspiron 15", "preco": 3599.90, "categoria": "notebooks"},
+    {"id": 2, "nome": "Notebook Lenovo IdeaPad 3", "preco": 2899.90, "categoria": "notebooks"},
+    {"id": 3, "nome": "MacBook Air M2", "preco": 8999.90, "categoria": "notebooks"},
+    {"id": 4, "nome": "PC Gamer Completo i5", "preco": 4299.90, "categoria": "computadores"},
+    # Perifericos
+    {"id": 5, "nome": "Mouse Wireless Logitech MX", "preco": 129.90, "categoria": "perifericos"},
+    {"id": 6, "nome": "Mouse Gamer Razer DeathAdder", "preco": 249.90, "categoria": "perifericos"},
+    {"id": 7, "nome": "Teclado Mecanico Redragon", "preco": 289.90, "categoria": "perifericos"},
+    {"id": 8, "nome": "Teclado Apple Magic Keyboard", "preco": 899.90, "categoria": "perifericos"},
+    {"id": 9, "nome": "Headset Gamer HyperX Cloud", "preco": 349.90, "categoria": "perifericos"},
+    {"id": 10, "nome": "Headset JBL Tune 510BT", "preco": 199.90, "categoria": "perifericos"},
+    # Monitores
+    {"id": 11, "nome": 'Monitor LED 24" Samsung', "preco": 899.90, "categoria": "monitores"},
+    {"id": 12, "nome": 'Monitor Gamer 27" 144Hz LG', "preco": 1599.90, "categoria": "monitores"},
+    {"id": 13, "nome": 'Monitor Ultrawide 34" Dell', "preco": 2499.90, "categoria": "monitores"},
+    # Cameras e Video
+    {"id": 14, "nome": "Webcam Logitech C920 HD", "preco": 429.90, "categoria": "cameras"},
+    {"id": 15, "nome": "Webcam Razer Kiyo Pro", "preco": 799.90, "categoria": "cameras"},
+    {"id": 16, "nome": "Ring Light 10 polegadas", "preco": 89.90, "categoria": "cameras"},
+    # Armazenamento
+    {"id": 17, "nome": "SSD 1TB Kingston NVMe", "preco": 399.90, "categoria": "armazenamento"},
+    {"id": 18, "nome": "SSD 2TB Samsung 980 Pro", "preco": 899.90, "categoria": "armazenamento"},
+    {"id": 19, "nome": "HD Externo 2TB Seagate", "preco": 449.90, "categoria": "armazenamento"},
+    {"id": 20, "nome": "Pen Drive 128GB SanDisk", "preco": 79.90, "categoria": "armazenamento"},
+    # Memoria e Componentes
+    {"id": 21, "nome": "Memoria RAM 16GB DDR4", "preco": 289.90, "categoria": "componentes"},
+    {"id": 22, "nome": "Memoria RAM 32GB DDR5", "preco": 599.90, "categoria": "componentes"},
+    {"id": 23, "nome": "Placa de Video RTX 3060", "preco": 2199.90, "categoria": "componentes"},
+    {"id": 24, "nome": "Fonte 650W Corsair 80Plus", "preco": 449.90, "categoria": "componentes"},
+    # Acessorios
+    {"id": 25, "nome": "Mousepad Gamer XL 90x40cm", "preco": 69.90, "categoria": "acessorios"},
+    {"id": 26, "nome": "Suporte Notebook Ajustavel", "preco": 119.90, "categoria": "acessorios"},
+    {"id": 27, "nome": "Hub USB-C 7 em 1", "preco": 189.90, "categoria": "acessorios"},
+    {"id": 28, "nome": "Cadeira Gamer Thunderx3", "preco": 1299.90, "categoria": "acessorios"},
+    # Smartphones e Tablets
+    {"id": 29, "nome": "iPhone 15 128GB", "preco": 5999.90, "categoria": "smartphones"},
+    {"id": 30, "nome": "Samsung Galaxy S24", "preco": 4499.90, "categoria": "smartphones"},
+    {"id": 31, "nome": "iPad 10 64GB Wi-Fi", "preco": 3799.90, "categoria": "tablets"},
+    {"id": 32, "nome": "Tablet Samsung Tab S9", "preco": 4299.90, "categoria": "tablets"},
 ]
 
 
