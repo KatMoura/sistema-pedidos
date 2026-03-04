@@ -1,0 +1,19 @@
+version: '3.8'
+services:
+  usuarios:
+    build: ./user_service
+    ports:
+      - "5001:5001"
+    volumes:
+      - ./user_service/users.db:/app/users.db
+
+  pedidos:
+    build: ./order_service
+    ports:
+      - "5000:5000"
+    depends_on:
+      - usuarios
+    environment:
+      - USER_SERVICE=http://usuarios:5001
+    volumes:
+      - ./order_service/orders.db:/app/orders.db
