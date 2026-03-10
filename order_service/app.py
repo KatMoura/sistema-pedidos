@@ -184,13 +184,17 @@ def criar_pedido():
         return jsonify({'error': 'cliente é obrigatório'}), 400
     
     try:
-        # Validar cliente via user service
-        r = requests.get(f"{USER_SERVICE}/api/usuarios")
-        usuarios = r.json()
-        cliente_existe = any(u.get('nome') == cliente for u in usuarios)
-        
-        if not cliente_existe:
-            # Se não encontra pelo name, continua mesmo assim (cliente pode ser livremente nomeado)
+        # Validar cliente via user service (opcional)
+        try:
+            r = requests.get(f"{USER_SERVICE}/api/usuarios", timeout=5)
+            r.raise_for_status()
+            usuarios = r.json()
+            cliente_existe = any(u.get('nome') == cliente for u in usuarios)
+            if not cliente_existe:
+                # Se não encontra pelo nome, continua mesmo assim (cliente pode ser livremente nomeado)
+                pass
+        except Exception:
+            # Sem user service disponível, seguir com o fluxo
             pass
         
         # Criar pedido

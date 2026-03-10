@@ -1,7 +1,9 @@
 document.addEventListener('DOMContentLoaded', function() {
     // API base URLs (microservices)
-    const API_ORDERS = 'http://localhost:5000';
-    const API_USERS  = 'http://localhost:5001';
+    const appConfig = window.__APP_CONFIG__ || {};
+    const normalizeBase = (url) => url.replace(/\/+$/, '');
+    const API_ORDERS = normalizeBase((appConfig.API_ORDERS || '').trim() || window.location.origin);
+    const API_USERS = normalizeBase((appConfig.API_USERS || '').trim() || window.location.origin);
 
     // Elementos do DOM
     const productList = document.getElementById('product-list');
