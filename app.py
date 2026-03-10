@@ -1,7 +1,7 @@
-import os
-import time
 from pathlib import Path
 from types import SimpleNamespace
+import os
+import time
 
 from flask import Flask, request, jsonify, render_template
 from flask_cors import CORS
@@ -10,23 +10,34 @@ from supabase import create_client, Client
 
 from observer import Pedido, Produto, EmailObserver, LogObserver, TelaObserver
 
-# Carrega .env da raiz do projeto (independente de onde o comando foi executado)
+# Carrega .env da raiz do projeto
 ROOT_DIR = Path(__file__).resolve().parent
-load_dotenv(ROOT_DIR / ".env")
-
-app = Flask(__name__)
-CORS(app)
+load_dotenv(ROOT_DIR / ".env", override=True)
 
 def _env(name: str, required: bool = True) -> str:
-    value = os.getenv(name, "").strip().strip('"').strip("'")
+    value = (os.getenv(name) or "").strip().strip('"').strip("'")
     if required and not value:
         raise RuntimeError(f"Variável obrigatória ausente: {name}")
     return value
 
-supabase: Client = create_client(
-    SUPABASE_URL = os.environ.get("SUPABASE_URL"),  
-    SUPABASE_KEY = os.environ.get("SUPABASE_KEY")
+SUPABASE_URL = _env("SUPABASE_URL")
+SUPABASE_KEY = (
+    _env("SUPABASE_SERVICE_KEY", required=False)
+    or _env("SUPABASE_KEY", required=False)
+    or _env("SUPABASE_ANON_KEY", required=False)
 )
+
+if not SUPABASE_KEY:
+    raise RuntimeError("Defina SUPABASE_SERVICE_KEY ou SUPABASE_KEY no .env")
+
+if not SUPABASE_URL.startswith("https://") or ".supabase.co" not in SUPABASE_URL:
+    raise RuntimeError("SUPABASE_URL inválida")
+
+# Correto: argumentos posicionais, sem keyword
+supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
+
+app = Flask(__name__)
+CORS(app)
 
 observadores_ativos = {
     "email": EmailObserver(),
@@ -60,7 +71,7 @@ def _notificar_observadores(pedido_id: int, cliente: str, status: str, produtos_
         observadores_ids = ["email", "log", "tela"]
 
     pedido = Pedido(cliente)
-    pedido.id = pedido_id  # preserva ID real do banco
+    pedido.id = pedido_id
     for p in produtos_rows:
         pedido.adicionar_produto(Produto(p["nome"], _to_float(p["preco"])))
 
@@ -69,7 +80,7 @@ def _notificar_observadores(pedido_id: int, cliente: str, status: str, produtos_
         if obs:
             pedido.adicionar_observador(obs)
 
-    pedido.status = status  # dispara notify no padrão Observer
+    pedido.status = status
 
 @app.route("/")
 def index():
@@ -103,10 +114,8 @@ def get_pedidos():
             .not_.in_("status", STATUS_FINALIZADOS)
             .order("id", desc=True)
             .execute()
-            .data
-            or []
+            .data or []
         )
-
         result = []
         for row in rows:
             produtos = _get_produtos_do_pedido(row["id"])
@@ -131,10 +140,8 @@ def get_historico_pedidos():
             .in_("status", STATUS_FINALIZADOS)
             .order("id", desc=True)
             .execute()
-            .data
-            or []
+            .data or []
         )
-
         historico = []
         for row in rows:
             produtos = _get_produtos_do_pedido(row["id"])
@@ -251,8 +258,7 @@ def get_pedido_detalhes(pedido_id):
             .select("id,cliente,status,data_criacao,data_finalizacao")
             .eq("id", pedido_id)
             .execute()
-            .data
-            or []
+            .data or []
         )
         if not pedido_rows:
             return jsonify({"error": "Pedido não encontrado"}), 404
@@ -266,8 +272,7 @@ def get_pedido_detalhes(pedido_id):
             .eq("pedido_id", pedido_id)
             .order("id")
             .execute()
-            .data
-            or []
+            .data or []
         )
 
         tipo = "finalizado" if pedido["status"] in STATUS_FINALIZADOS else "ativo"
@@ -325,6 +330,6 @@ def get_observadores():
     ])
 
 if __name__ == "__main__":
-    print("SISTEMA DE GERENCIAMENTO DE PEDIDOS - INTERFACE WEB")
+    print("SISTEMA DE GERENCIAMENTO DE PEDIDOS")
     print("Servidor iniciado em: http://localhost:5000")
     app.run(debug=True, port=5000)
