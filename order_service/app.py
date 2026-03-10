@@ -51,6 +51,31 @@ def init_db():
 
 # --- PRODUTOS CRUD ----
 
+def seed_produtos():
+    produtos_iniciais = [
+        {"nome": "Hambúrguer Clássico", "preco": 22.90},
+        {"nome": "X-Bacon", "preco": 27.50},
+        {"nome": "Batata Frita", "preco": 14.00},
+        {"nome": "Refrigerante Lata", "preco": 6.50},
+        {"nome": "Suco Natural", "preco": 8.00},
+        {"nome": "Pizza Calabresa", "preco": 49.90},
+        {"nome": "Pizza Margherita", "preco": 47.90},
+        {"nome": "Água Mineral", "preco": 4.00},
+    ]
+
+    for p in produtos_iniciais:
+        existe = (
+            supabase.table("produtos")
+            .select("id")
+            .eq("nome", p["nome"])
+            .limit(1)
+            .execute()
+            .data
+            or []
+        )
+        if not existe:
+            supabase.table("produtos").insert(p).execute()
+
 @app.route('/api/produtos', methods=['GET'])
 def listar_produtos():
     try:
