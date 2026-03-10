@@ -1,6 +1,7 @@
 """
 Sistema de Pedidos - Backend FastAPI
 Implementa o padrao Observer para notificacoes em tempo real.
+Integra com Supabase para persistencia de dados quando configurado.
 """
 
 import time
@@ -19,6 +20,7 @@ from observer import (
     KitchenObserver,
     AnalyticsObserver,
 )
+from db import get_supabase_client
 
 app = fastapi.FastAPI(title="Sistema de Pedidos - Observer Pattern")
 
@@ -34,6 +36,50 @@ app.add_middleware(
 pedidos_ativos: dict[int, dict] = {}
 pedidos_finalizados: dict[int, dict] = {}
 notificacoes_globais: list[dict] = []
+
+
+# --- Supabase helpers ---
+
+def _supabase_salvar_pedido(pedido_id: int, pedido: "Pedido", data_criacao: str) -> None:
+    """Persiste um novo pedido no Supabase (se configurado)."""
+    supabase = get_supabase_client()
+    if supabase is None:
+        return
+    try:
+        produtos_json = [p.to_dict() for p in pedido.produtos]
+        supabase.table("pedidos").upsert(
+            {
+                "id": pedido_id,
+                "cliente": pedido.cliente,
+                "status": pedido.status,
+                "total": pedido.calcular_total(),
+                "produtos": produtos_json,
+                "data_criacao": data_criacao,
+                "finalizado": False,
+                "data_finalizacao": None,
+            }
+        ).execute()
+    except Exception as exc:
+        print(f"[SUPABASE] Erro ao salvar pedido #{pedido_id}: {exc}")
+
+
+def _supabase_atualizar_status(
+    pedido_id: int,
+    novo_status: str,
+    finalizado: bool,
+    data_finalizacao: str | None,
+) -> None:
+    """Atualiza o status de um pedido no Supabase (se configurado)."""
+    supabase = get_supabase_client()
+    if supabase is None:
+        return
+    try:
+        payload: dict = {"status": novo_status, "finalizado": finalizado}
+        if data_finalizacao:
+            payload["data_finalizacao"] = data_finalizacao
+        supabase.table("pedidos").update(payload).eq("id", pedido_id).execute()
+    except Exception as exc:
+        print(f"[SUPABASE] Erro ao atualizar status do pedido #{pedido_id}: {exc}")
 
 # Observadores disponiveis
 OBSERVADORES = {
@@ -184,6 +230,9 @@ async def criar_pedido(req: CriarPedidoRequest):
         "data_criacao": data_criacao,
     }
 
+    # Persistir no Supabase (se configurado)
+    _supabase_salvar_pedido(pedido_id, pedido, data_criacao)
+
     # Notificacao global de criacao
     notificacoes_globais.append(
         {
@@ -241,6 +290,14 @@ async def atualizar_status(pedido_id: int, req: AtualizarStatusRequest):
         }
         del pedidos_ativos[pedido_id]
         movido = True
+
+    # Persistir mudanca de status no Supabase (se configurado)
+    _supabase_atualizar_status(
+        pedido_id,
+        novo_status=req.status,
+        finalizado=movido,
+        data_finalizacao=data_alteracao if movido else None,
+    )
 
     return {
         "message": "Status atualizado com sucesso",
