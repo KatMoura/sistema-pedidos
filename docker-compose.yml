@@ -1,19 +1,32 @@
 version: '3.8'
 services:
-  usuarios:
+  usuario-service:
     build: ./user_service
     ports:
       - "5001:5001"
-    volumes:
-      - ./user_service/users.db:/app/users.db
+    environment:
+      - SUPABASE_URL=${SUPABASE_URL}
+      - SUPABASE_KEY=${SUPABASE_KEY}
+    depends_on:
+      - supabase
 
-  pedidos:
+  order-service:
     build: ./order_service
     ports:
       - "5000:5000"
-    depends_on:
-      - usuarios
     environment:
-      - USER_SERVICE=http://usuarios:5001
-    volumes:
-      - ./order_service/orders.db:/app/orders.db
+      - SUPABASE_URL=${SUPABASE_URL}
+      - SUPABASE_KEY=${SUPABASE_KEY}
+      - USER_SERVICE=http://usuario-service:5001
+    depends_on:
+      - supabase
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    ports:
+      - "3000:3000"
+    depends_on:
+      - order-service
+      - usuario-service

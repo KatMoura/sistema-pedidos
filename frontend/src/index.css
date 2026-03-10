@@ -1,6 +1,32 @@
-body{
-    font-family: "Inter", -apple-system,
-    BlinkMacSystemFont, sans-serif;
-    
+/* Reset e estilos base */
+* {
+  box-sizing: border-box;
 }
 
+body {
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Animação slide-in */
+@keyframes slide-in {
+  from {
+    transform: translateX(100%);
+    opacity: 0;
+  }
+  to {
+    transform: translateX(0);
+    opacity: 1;
+  }
+}
+
+.animate-slide-in {
+  animation: slide-in 0.3s ease-out;
+}
+
+/* Container com largura máxima e centralizado */
+.container {
+  max-width: 80rem; /* 1280px */
+  margin-left: auto;
+  margin-right: auto;
+}

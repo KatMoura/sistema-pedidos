@@ -1,174 +1,386 @@
 from flask import Flask, jsonify, request
 from flask_cors import CORS
-import sqlite3
+from supabase import create_client, Client
 import os
 import time
 import requests
+from dotenv import load_dotenv
 
 from models import EmailObserver, LogObserver, TelaObserver
-from db import init_db, DB_PATH
-from factories import ProdutoFactory, PedidoFactory, get_db_connection
+from factories import ProdutoFactory, PedidoFactory
+
+load_dotenv()
 
 app = Flask(__name__)
 CORS(app)
-init_db()
 
-# endereços configuráveis
+# Inicializar Supabase
+SUPABASE_URL = os.environ.get('SUPABASE_URL')
+SUPABASE_KEY = (
+    os.environ.get('SUPABASE_KEY')
+    or os.environ.get('SUPABASE_ANON_KEY')
+    or os.environ.get('SUPABASE_SERVICE_ROLE_KEY')
+)
+
+if not SUPABASE_URL:
+    raise RuntimeError('SUPABASE_URL nao definido no ambiente')
+if not SUPABASE_KEY:
+    raise RuntimeError(
+        'SUPABASE_KEY ausente. Use a anon key ou a service role key do Supabase.'
+    )
+if SUPABASE_KEY.startswith('sb_publishable_'):
+    raise RuntimeError(
+        'SUPABASE_KEY invalido. Esse e um publishable key; use a anon key ou a service role key.'
+    )
+
+supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
+
+# Endereço do user service
 USER_SERVICE = os.environ.get('USER_SERVICE', 'http://localhost:5001')
 
-# --- produtos CRUD ------------------------------------------------
+def init_db():
+    """Verifica se as tabelas existem no Supabase"""
+    try:
+        supabase.table('produtos').select('*').limit(1).execute()
+        supabase.table('pedidos').select('*').limit(1).execute()
+        supabase.table('pedido_produtos').select('*').limit(1).execute()
+        supabase.table('historico').select('*').limit(1).execute()
+        print("Todas as tabelas existem")
+    except Exception as e:
+        print(f"Erro ao verificar tabelas: {e}")
+
+# --- PRODUTOS CRUD ----
 
 @app.route('/api/produtos', methods=['GET'])
 def listar_produtos():
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    cursor.execute('SELECT id, nome, preco FROM produtos')
-    produtos = [dict(row) for row in cursor.fetchall()]
-    conn.close()
-    return jsonify(produtos)
+    try:
+        response = supabase.table('produtos').select('*').execute()
+        produtos = response.data if response.data else []
+        return jsonify(produtos)
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
 
 @app.route('/api/produtos', methods=['POST'])
 def criar_produto():
     data = request.json
     nome = data.get('nome')
     preco = data.get('preco')
+    
     if not nome or preco is None:
         return jsonify({'error': 'nome e preco obrigatórios'}), 400
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    cursor.execute('INSERT INTO produtos (nome, preco) VALUES (?,?)', (nome, preco))
-    conn.commit()
-    produto_id = cursor.lastrowid
-    conn.close()
-    return jsonify({'id': produto_id, 'nome': nome, 'preco': preco}), 201
+    
+    try:
+        response = supabase.table('produtos').insert({
+            'nome': nome,
+            'preco': preco
+        }).execute()
+        
+        produto = response.data[0] if response.data else None
+        return jsonify({
+            'id': produto['id'],
+            'nome': produto['nome'],
+            'preco': produto['preco']
+        }), 201
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
 
 @app.route('/api/produtos/<int:produto_id>', methods=['PUT'])
 def atualizar_produto(produto_id):
     data = request.json
     nome = data.get('nome')
     preco = data.get('preco')
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    cursor.execute('UPDATE produtos SET nome=?, preco=? WHERE id=?', (nome, preco, produto_id))
-    if cursor.rowcount == 0:
-        conn.close()
-        return jsonify({'error': 'produto não encontrado'}), 404
-    conn.commit()
-    conn.close()
-    return jsonify({'id': produto_id, 'nome': nome, 'preco': preco})
+    
+    try:
+        response = supabase.table('produtos').update({
+            'nome': nome,
+            'preco': preco
+        }).eq('id', produto_id).execute()
+        
+        if not response.data:
+            return jsonify({'error': 'produto não encontrado'}), 404
+        
+        produto = response.data[0]
+        return jsonify({
+            'id': produto['id'],
+            'nome': produto['nome'],
+            'preco': produto['preco']
+        })
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
 
 @app.route('/api/produtos/<int:produto_id>', methods=['DELETE'])
 def apagar_produto(produto_id):
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    cursor.execute('DELETE FROM produtos WHERE id=?', (produto_id,))
-    if cursor.rowcount == 0:
-        conn.close()
-        return jsonify({'error': 'produto não encontrado'}), 404
-    conn.commit()
-    conn.close()
-    return jsonify({'message': 'produto removido'})
+    try:
+        response = supabase.table('produtos').delete().eq('id', produto_id).execute()
+        
+        if not response.data:
+            return jsonify({'error': 'produto não encontrado'}), 404
+        
+        return jsonify({'message': 'produto removido'})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
 
-# --- pedidos -------------------------------------------------------
+# --- PEDIDOS ----
 
 @app.route('/api/pedidos', methods=['GET'])
 def listar_pedidos():
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    cursor.execute('SELECT id, cliente, status, data_criacao FROM pedidos')
-    pedidos = []
-    for row in cursor.fetchall():
-        pedidos.append({
-            'id': row['id'],
-            'cliente': row['cliente'],
-            'status': row['status'],
-            'data_criacao': row['data_criacao']
-        })
-    conn.close()
-    return jsonify(pedidos)
-
+    try:
+        response = supabase.table('pedidos').select('*').execute()
+        pedidos = []
+        
+        for row in response.data:
+            # Buscar produtos do pedido
+            produtos_response = supabase.table('pedido_produtos').select(
+                'produto_id'
+            ).eq('pedido_id', row['id']).execute()
+            
+            quantidade_produtos = len(produtos_response.data) if produtos_response.data else 0
+            
+            pedidos.append({
+                'id': row['id'],
+                'cliente': row['cliente'],
+                'status': row['status'],
+                'data_criacao': row['data_criacao'],
+                'quantidade_produtos': quantidade_produtos,
+                'total': 0  # Será calculado no frontend ou incluir join
+            })
+        
+        return jsonify(pedidos)
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
 
 @app.route('/api/pedidos', methods=['POST'])
 def criar_pedido():
     data = request.json
     cliente = data.get('cliente')
     produto_ids = data.get('produtos', [])
-    # valida cliente via API de usuários
+    
     if not cliente:
         return jsonify({'error': 'cliente é obrigatório'}), 400
+    
     try:
-        r = requests.get(f"{USER_SERVICE}/api/usuarios/{cliente}")
-        if r.status_code != 200:
-            return jsonify({'error': 'cliente não encontrado em usuário-service'}), 404
-    except requests.exceptions.RequestException:
-        return jsonify({'error': 'falha ao comunicar usuário-service'}), 500
-
-    # buscar objetos Produto via factory
-    produtos = []
-    for pid in produto_ids:
-        p = ProdutoFactory.from_db(pid)
-        if p:
-            produtos.append(p)
-    pedido = PedidoFactory.create(cliente, produtos)
-    # registramos observadores exemplares
-    pedido.adicionar_observador(EmailObserver())
-    pedido.adicionar_observador(LogObserver())
-    pedido.adicionar_observador(TelaObserver())
-
-    # persistir em banco
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    now = time.strftime('%d/%m/%Y %H:%M:%S')
-    cursor.execute('INSERT INTO pedidos (cliente, status, data_criacao) VALUES (?,?,?)',
-                   (pedido.cliente, pedido.status, now))
-    pedido_id = cursor.lastrowid
-    for prod in produtos:
-        cursor.execute('INSERT INTO pedido_produtos (pedido_id, produto_id) VALUES (?,?)',
-                       (pedido_id, prod.id))
-    cursor.execute('INSERT INTO historico (pedido_id, status, data, observacoes) VALUES (?,?,?,?)',
-                   (pedido_id, pedido.status, now, 'Pedido criado'))
-    conn.commit()
-    conn.close()
-    return jsonify({'message': 'Pedido criado', 'pedido_id': pedido_id, 'total': pedido.calcular_total()}), 201
+        # Validar cliente via user service
+        r = requests.get(f"{USER_SERVICE}/api/usuarios")
+        usuarios = r.json()
+        cliente_existe = any(u.get('nome') == cliente for u in usuarios)
+        
+        if not cliente_existe:
+            # Se não encontra pelo name, continua mesmo assim (cliente pode ser livremente nomeado)
+            pass
+        
+        # Criar pedido
+        now = time.strftime('%d/%m/%Y %H:%M:%S')
+        
+        response = supabase.table('pedidos').insert({
+            'cliente': cliente,
+            'status': 'Pendente',
+            'data_criacao': now,
+            'data_finalizacao': None
+        }).execute()
+        
+        if not response.data:
+            return jsonify({'error': 'Falha ao criar pedido'}), 500
+        
+        pedido_id = response.data[0]['id']
+        
+        # Adicionar produtos ao pedido
+        for produto_id in produto_ids:
+            supabase.table('pedido_produtos').insert({
+                'pedido_id': pedido_id,
+                'produto_id': produto_id
+            }).execute()
+        
+        # Adicionar ao histórico
+        supabase.table('historico').insert({
+            'pedido_id': pedido_id,
+            'status': 'Pendente',
+            'data': now,
+            'observacoes': 'Pedido criado'
+        }).execute()
+        
+        # Calcular total
+        total = 0
+        for pid in produto_ids:
+            prod_response = supabase.table('produtos').select('preco').eq('id', pid).execute()
+            if prod_response.data:
+                total += prod_response.data[0]['preco']
+        
+        return jsonify({
+            'message': 'Pedido criado',
+            'pedido_id': pedido_id,
+            'total': total
+        }), 201
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
 
 @app.route('/api/pedidos/<int:pedido_id>/status', methods=['PUT'])
 def atualizar_status(pedido_id):
     data = request.json
     novo_status = data.get('status')
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    cursor.execute('SELECT status FROM pedidos WHERE id=?', (pedido_id,))
-    row = cursor.fetchone()
-    if not row:
-        conn.close()
-        return jsonify({'error': 'pedido não encontrado'}), 404
-    status_anterior = row['status']
-    cursor.execute('UPDATE pedidos SET status=? WHERE id=?', (novo_status, pedido_id))
-    now = time.strftime('%d/%m/%Y %H:%M:%S')
-    cursor.execute('INSERT INTO historico (pedido_id, status, data, observacoes) VALUES (?,?,?,?)',
-                   (pedido_id, novo_status, now,
-                    f'Status alterado de {status_anterior} para {novo_status}'))
-    conn.commit()
-    conn.close()
-    # notificar observadores não persistidos (para demo, recarregamos o pedido)
-    pedido = PedidoFactory.from_db(pedido_id)
-    if pedido:
-        pedido.adicionar_observador(EmailObserver())
-        pedido.adicionar_observador(LogObserver())
-        pedido.adicionar_observador(TelaObserver())
-        pedido.status = novo_status
-    return jsonify({'message': 'status atualizado'})
+    
+    try:
+        # Buscar status anterior
+        response = supabase.table('pedidos').select('status').eq('id', pedido_id).execute()
+        
+        if not response.data:
+            return jsonify({'error': 'pedido não encontrado'}), 404
+        
+        status_anterior = response.data[0]['status']
+        now = time.strftime('%d/%m/%Y %H:%M:%S')
+        
+        # Atualizar status
+        supabase.table('pedidos').update({
+            'status': novo_status,
+            'data_finalizacao': now if novo_status in ['Entregue', 'Cancelado'] else None
+        }).eq('id', pedido_id).execute()
+        
+        # Registrar no histórico
+        supabase.table('historico').insert({
+            'pedido_id': pedido_id,
+            'status': novo_status,
+            'data': now,
+            'observacoes': f'Status alterado de {status_anterior} para {novo_status}'
+        }).execute()
+        
+        return jsonify({
+            'message': 'status atualizado',
+            'pedido_id': pedido_id,
+            'status_novo': novo_status,
+            'movido_para_historico': novo_status in ['Entregue', 'Cancelado']
+        })
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
 
 @app.route('/api/pedidos/<int:pedido_id>', methods=['GET'])
 def get_pedido(pedido_id):
-    pedido = PedidoFactory.from_db(pedido_id)
-    if not pedido:
-        return jsonify({'error': 'pedido não encontrado'}), 404
-    # montar detalhes
-    produtos = [{'id': p.id, 'nome': p.nome, 'preco': p.preco} for p in pedido.produtos]
-    return jsonify({'id': pedido.id, 'cliente': pedido.cliente, 'status': pedido.status,
-                    'total': pedido.calcular_total(), 'produtos': produtos})
+    try:
+        response = supabase.table('pedidos').select('*').eq('id', pedido_id).execute()
+        
+        if not response.data:
+            return jsonify({'error': 'pedido não encontrado'}), 404
+        
+        pedido_data = response.data[0]
+        
+        # Buscar produtos
+        produtos_response = supabase.table('pedido_produtos').select(
+            'produto_id'
+        ).eq('pedido_id', pedido_id).execute()
+        
+        produtos = []
+        total = 0
+        
+        for item in produtos_response.data:
+            prod_response = supabase.table('produtos').select('*').eq(
+                'id', item['produto_id']
+            ).execute()
+            
+            if prod_response.data:
+                prod = prod_response.data[0]
+                produtos.append({
+                    'id': prod['id'],
+                    'nome': prod['nome'],
+                    'preco': prod['preco']
+                })
+                total += prod['preco']
+        
+        # Buscar histórico
+        historico_response = supabase.table('historico').select('*').eq(
+            'pedido_id', pedido_id
+        ).execute()
+        
+        historico = historico_response.data if historico_response.data else []
+        
+        return jsonify({
+            'id': pedido_data['id'],
+            'cliente': pedido_data['cliente'],
+            'status': pedido_data['status'],
+            'total': total,
+            'produtos': produtos,
+            'historico': historico,
+            'tipo': 'ativo' if pedido_data['status'] not in ['Entregue', 'Cancelado'] else 'finalizado',
+            'data_criacao': pedido_data['data_criacao'],
+            'data_finalizacao': pedido_data['data_finalizacao']
+        })
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/pedidos/historico', methods=['GET'])
+def get_historico():
+    try:
+        response = supabase.table('pedidos').select('*').in_(
+            'status', ['Entregue', 'Cancelado']
+        ).execute()
+        
+        historico = []
+        
+        for pedido in response.data:
+            # Contar produtos
+            prods = supabase.table('pedido_produtos').select('*').eq(
+                'pedido_id', pedido['id']
+            ).execute()
+            
+            historico.append({
+                'id': pedido['id'],
+                'cliente': pedido['cliente'],
+                'status': pedido['status'],
+                'data_criacao': pedido['data_criacao'],
+                'data_finalizacao': pedido['data_finalizacao'],
+                'quantidade_produtos': len(prods.data) if prods.data else 0,
+                'dias_ativos': 1  # Calcular corretamente se necessário
+            })
+        
+        return jsonify(historico)
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/estatisticas', methods=['GET'])
+def get_estatisticas():
+    try:
+        # Total de pedidos
+        todos = supabase.table('pedidos').select('*').execute()
+        total_pedidos = len(todos.data) if todos.data else 0
+        
+        # Pedidos por status
+        ativos = supabase.table('pedidos').select('*').not_.in_(
+            'status', ['Entregue', 'Cancelado']
+        ).execute()
+        
+        entregues = supabase.table('pedidos').select('*').eq(
+            'status', 'Entregue'
+        ).execute()
+        
+        cancelados = supabase.table('pedidos').select('*').eq(
+            'status', 'Cancelado'
+        ).execute()
+        
+        # Calcular total vendido
+        valor_total = 0
+        if entregues.data:
+            for pedido in entregues.data:
+                produtos = supabase.table('pedido_produtos').select(
+                    'produto_id'
+                ).eq('pedido_id', pedido['id']).execute()
+                
+                for item in produtos.data:
+                    prod = supabase.table('produtos').select('preco').eq(
+                        'id', item['produto_id']
+                    ).execute()
+                    if prod.data:
+                        valor_total += prod.data[0]['preco']
+        
+        return jsonify({
+            'pedidos_ativos': len(ativos.data) if ativos.data else 0,
+            'pedidos_finalizados': len(entregues.data) + len(cancelados.data) if entregues.data or cancelados.data else 0,
+            'pedidos_entregues': len(entregues.data) if entregues.data else 0,
+            'pedidos_cancelados': len(cancelados.data) if cancelados.data else 0,
+            'total_pedidos': total_pedidos,
+            'valor_total_vendido': valor_total,
+            'taxa_entrega': (len(entregues.data) / max(total_pedidos, 1) * 100) if entregues.data else 0
+        })
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
 
 if __name__ == '__main__':
+    init_db()
     print('Order service rodando na porta 5000')
     app.run(port=5000, debug=True)

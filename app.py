@@ -1,272 +1,330 @@
-from flask import Flask, render_template, jsonify, request #a base da web 
-from flask_cors import CORS #permite que o js do navegador fale com o pyhon
-import threading
+import os
 import time
-import json
-import sys #gerencia paths dos arquivos
-import os #gerencia paths dos arquivos
+from pathlib import Path
+from types import SimpleNamespace
 
-# Adiciona o diretório atual ao path para importar observer.py
-sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+from flask import Flask, request, jsonify, render_template
+from flask_cors import CORS
+from dotenv import load_dotenv
+from supabase import create_client, Client
 
 from observer import Pedido, Produto, EmailObserver, LogObserver, TelaObserver
+
+# Carrega .env da raiz do projeto (independente de onde o comando foi executado)
+ROOT_DIR = Path(__file__).resolve().parent
+load_dotenv(ROOT_DIR / ".env")
 
 app = Flask(__name__)
 CORS(app)
 
-# Dados em memória para simulação
-pedidos_ativos = {}
-historico_pedidos = []  # Lista para histórico completo
-pedidos_finalizados = {}  # Dicionário para pedidos entregues ou cancelados
+def _env(name: str, required: bool = True) -> str:
+    value = os.getenv(name, "").strip().strip('"').strip("'")
+    if required and not value:
+        raise RuntimeError(f"Variável obrigatória ausente: {name}")
+    return value
+
+supabase: Client = create_client(
+    SUPABASE_URL = os.environ.get("SUPABASE_URL"),  
+    SUPABASE_KEY = os.environ.get("SUPABASE_KEY")
+)
+
 observadores_ativos = {
-    'email': EmailObserver(),
-    'log': LogObserver(),
-    'tela': TelaObserver()
+    "email": EmailObserver(),
+    "log": LogObserver(),
+    "tela": TelaObserver(),
 }
 
-@app.route('/')
-def index():
-    #pagina principal do sistema 
-    return render_template('index.html')
+STATUS_FINALIZADOS = [Pedido.STATUS_ENTREGUE, Pedido.STATUS_CANCELADO]
 
-@app.route('/api/produtos', methods=['GET']) #um decorador que define a rota e o método HTTP para acessar os produtos disponíveis
-def get_produtos():
-    #retorna os produtos disponiveis para o cliente escolher
-    produtos = [
-        {"id": 1, "nome": "Notebook Dell Inspiron", "preco": 3599.90},
-        {"id": 2, "nome": "Mouse Wireless Logitech", "preco": 129.90},
-        {"id": 3, "nome": "Teclado Mecânico Redragon", "preco": 289.90},
-        {"id": 4, "nome": "Monitor LED 24\" Samsung", "preco": 899.90},
-        {"id": 5, "nome": "Headset Gamer HyperX", "preco": 349.90},
-        {"id": 6, "nome": "Webcam Logitech C920", "preco": 429.90},
-        {"id": 7, "nome": "SSD 1TB Kingston", "preco": 399.90},
-        {"id": 8, "nome": "Memória RAM 16GB", "preco": 289.90}
-    ]
-    return jsonify(produtos)
+def now_str() -> str:
+    return time.strftime("%d/%m/%Y %H:%M:%S")
 
-@app.route('/api/pedidos', methods=['GET'])
-def get_pedidos():
-    # Retorna a lista de pedidos ativos
-    pedidos_list = []
-    for pedido_id, pedido_data in pedidos_ativos.items():
-        pedidos_list.append({
-            'id': pedido_id,
-            'cliente': pedido_data['pedido'].cliente,
-            'status': pedido_data['pedido'].status,
-            'total': pedido_data['pedido'].calcular_total(),
-            'quantidade_produtos': len(pedido_data['pedido'].produtos),
-            'data_criacao': pedido_data['data_criacao']
-        })
-    return jsonify(pedidos_list)
+def _to_float(v):
+    try:
+        return float(v)
+    except Exception:
+        return 0.0
 
-@app.route('/api/pedidos/historico', methods=['GET'])
-def get_historico_pedidos():
-    # Retorna o histórico de pedidos finalizados
-    historico_list = []
-    for pedido_id, pedido_data in pedidos_finalizados.items():
-        historico_list.append({
-            'id': pedido_id,
-            'cliente': pedido_data['pedido'].cliente,
-            'status': pedido_data['pedido'].status,
-            'total': pedido_data['pedido'].calcular_total(),
-            'quantidade_produtos': len(pedido_data['pedido'].produtos),
-            'data_criacao': pedido_data['data_criacao'],
-            'data_finalizacao': pedido_data['data_finalizacao'],
-            'dias_ativos': pedido_data.get('dias_ativos', 0)
-        })
-    
-    # Ordenar por data de finalização (mais recente primeiro)
-    historico_list.sort(key=lambda x: x['data_finalizacao'], reverse=True)
-    return jsonify(historico_list)
+def _get_produtos_do_pedido(pedido_id: int):
+    links = supabase.table("pedido_produtos").select("produto_id").eq("pedido_id", pedido_id).execute().data or []
+    if not links:
+        return []
+    ids = [l["produto_id"] for l in links]
+    return supabase.table("produtos").select("id,nome,preco").in_("id", ids).execute().data or []
 
-@app.route('/api/pedidos', methods=['POST']) #mesma coisa do GET, mas para criar um novo pedido
-def criar_pedido():
-    #cria um novo pedido com os dados enviados pelo cliente (nome e produtos selecionados)
-    data = request.json
-    cliente = data.get('cliente')
-    produtos_ids = data.get('produtos', [])
-    
-    if not cliente:
-        return jsonify({'error': 'Nome do cliente é obrigatório'}), 400
-    
-    # Cria o pedido
+def _total_pedido(produtos: list) -> float:
+    return sum(_to_float(p.get("preco")) for p in produtos)
+
+def _notificar_observadores(pedido_id: int, cliente: str, status: str, produtos_rows: list, observadores_ids=None):
+    if observadores_ids is None:
+        observadores_ids = ["email", "log", "tela"]
+
     pedido = Pedido(cliente)
-    
-    # Adiciona produtos
-    produtos_disponiveis = {
-        1: Produto("Notebook Dell Inspiron", 3599.90),
-        2: Produto("Mouse Wireless Logitech", 129.90),
-        3: Produto("Teclado Mecânico Redragon", 289.90),
-        4: Produto("Monitor LED 24\" Samsung", 899.90),
-        5: Produto("Headset Gamer HyperX", 349.90),
-        6: Produto("Webcam Logitech C920", 429.90),
-        7: Produto("SSD 1TB Kingston", 399.90),
-        8: Produto("Memória RAM 16GB", 289.90)
-    }
-    
-    for produto_id in produtos_ids:
-        if produto_id in produtos_disponiveis:
-            pedido.adicionar_produto(produtos_disponiveis[produto_id])
-    
-    # Registra observadores ativos
-    observadores_selecionados = data.get('observadores', ['email', 'log', 'tela'])
-    for obs in observadores_selecionados:
-        if obs in observadores_ativos:
-            pedido.adicionar_observador(observadores_ativos[obs])
+    pedido.id = pedido_id  # preserva ID real do banco
+    for p in produtos_rows:
+        pedido.adicionar_produto(Produto(p["nome"], _to_float(p["preco"])))
 
-    # Armazena o pedido
-    pedido_id = pedido.id
-    data_criacao = time.strftime('%d/%m/%Y %H:%M:%S')
-    pedidos_ativos[pedido_id] = {
-        'pedido': pedido,
-        'historico': [{
-            'status': pedido.status,
-            'data': data_criacao,
-            'observacoes': 'Pedido criado'
-        }],
-        'data_criacao': data_criacao
-    }
-    
-    return jsonify({
-        'message': 'Pedido criado com sucesso',
-        'pedido_id': pedido_id,
-        'status': pedido.status,
-        'total': pedido.calcular_total()
-    })
+    for oid in observadores_ids:
+        obs = observadores_ativos.get(oid)
+        if obs:
+            pedido.adicionar_observador(obs)
 
-@app.route('/api/pedidos/<int:pedido_id>/status', methods=['PUT']) #mesma coisa das outras, mas para atualizar o status de um pedido específico
-def atualizar_status(pedido_id):
-    #atualiza o status de um pedido específico e registra a mudança no histórico
-    data = request.json
-    novo_status = data.get('status')
-    
-    if pedido_id not in pedidos_ativos:
-        return jsonify({'error': 'Pedido não encontrado'}), 404
-    
-    pedido = pedidos_ativos[pedido_id]['pedido']
-    status_anterior = pedido.status
-    
-    # Atualiza o status (isso disparará as notificações dos observadores)
-    pedido.status = novo_status
-    
-    # Registra no histórico
-    data_alteracao = time.strftime('%d/%m/%Y %H:%M:%S')
-    pedidos_ativos[pedido_id]['historico'].append({
-        'status': novo_status,
-        'data': data_alteracao,
-        'observacoes': f'Status alterado de {status_anterior} para {novo_status}'
-    })
-    
-    # Se o pedido foi entregue ou cancelado, mover para histórico
-    if novo_status in [Pedido.STATUS_ENTREGUE, Pedido.STATUS_CANCELADO]:
-        # Calcular dias ativos (simulação)
-        data_criacao = pedidos_ativos[pedido_id]['data_criacao']
-        dias_ativos = 1  # Em um sistema real, calcularíamos a diferença de dias
-        
-        # Mover para histórico
-        pedidos_finalizados[pedido_id] = {
-            'pedido': pedido,
-            'historico': pedidos_ativos[pedido_id]['historico'],
-            'data_criacao': data_criacao,
-            'data_finalizacao': data_alteracao,
-            'dias_ativos': dias_ativos
-        }
-        
-        # Remover dos pedidos ativos
-        del pedidos_ativos[pedido_id]
-        
+    pedido.status = status  # dispara notify no padrão Observer
+
+@app.route("/")
+def index():
+    try:
+        return render_template("index.html")
+    except Exception:
+        return jsonify({"ok": True, "message": "API de pedidos online"}), 200
+
+@app.route("/api/health/supabase", methods=["GET"])
+def health_supabase():
+    try:
+        supabase.table("pedidos").select("id").limit(1).execute()
+        return jsonify({"ok": True, "supabase": "connected"})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+@app.route("/api/produtos", methods=["GET"])
+def get_produtos():
+    try:
+        produtos = supabase.table("produtos").select("id,nome,preco").order("id").execute().data or []
+        return jsonify(produtos)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route("/api/pedidos", methods=["GET"])
+def get_pedidos():
+    try:
+        rows = (
+            supabase.table("pedidos")
+            .select("id,cliente,status,data_criacao")
+            .not_.in_("status", STATUS_FINALIZADOS)
+            .order("id", desc=True)
+            .execute()
+            .data
+            or []
+        )
+
+        result = []
+        for row in rows:
+            produtos = _get_produtos_do_pedido(row["id"])
+            result.append({
+                "id": row["id"],
+                "cliente": row["cliente"],
+                "status": row["status"],
+                "total": _total_pedido(produtos),
+                "quantidade_produtos": len(produtos),
+                "data_criacao": row.get("data_criacao"),
+            })
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route("/api/pedidos/historico", methods=["GET"])
+def get_historico_pedidos():
+    try:
+        rows = (
+            supabase.table("pedidos")
+            .select("id,cliente,status,data_criacao,data_finalizacao")
+            .in_("status", STATUS_FINALIZADOS)
+            .order("id", desc=True)
+            .execute()
+            .data
+            or []
+        )
+
+        historico = []
+        for row in rows:
+            produtos = _get_produtos_do_pedido(row["id"])
+            historico.append({
+                "id": row["id"],
+                "cliente": row["cliente"],
+                "status": row["status"],
+                "total": _total_pedido(produtos),
+                "quantidade_produtos": len(produtos),
+                "data_criacao": row.get("data_criacao"),
+                "data_finalizacao": row.get("data_finalizacao"),
+                "dias_ativos": 1,
+            })
+        return jsonify(historico)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route("/api/pedidos", methods=["POST"])
+def criar_pedido():
+    try:
+        data = request.json or {}
+        cliente = (data.get("cliente") or "").strip()
+        produtos_ids = data.get("produtos", [])
+        observadores_ids = data.get("observadores", ["email", "log", "tela"])
+
+        if not cliente:
+            return jsonify({"error": "Nome do cliente é obrigatório"}), 400
+
+        data_criacao = now_str()
+
+        pedido_resp = supabase.table("pedidos").insert({
+            "cliente": cliente,
+            "status": Pedido.STATUS_PENDENTE,
+            "data_criacao": data_criacao,
+            "data_finalizacao": None,
+        }).execute().data
+
+        if not pedido_resp:
+            return jsonify({"error": "Falha ao criar pedido"}), 500
+
+        pedido_id = pedido_resp[0]["id"]
+
+        if produtos_ids:
+            payload_links = [{"pedido_id": pedido_id, "produto_id": int(pid)} for pid in produtos_ids]
+            supabase.table("pedido_produtos").insert(payload_links).execute()
+
+        supabase.table("historico").insert({
+            "pedido_id": pedido_id,
+            "status": Pedido.STATUS_PENDENTE,
+            "data": data_criacao,
+            "observacoes": "Pedido criado",
+        }).execute()
+
+        produtos_rows = _get_produtos_do_pedido(pedido_id)
+        _notificar_observadores(pedido_id, cliente, Pedido.STATUS_PENDENTE, produtos_rows, observadores_ids)
+
         return jsonify({
-            'message': f'Status atualizado para {novo_status}. Pedido movido para histórico.',
-            'pedido_id': pedido_id,
-            'status_anterior': status_anterior,
-            'status_novo': novo_status,
-            'movido_para_historico': True
+            "message": "Pedido criado com sucesso",
+            "pedido_id": pedido_id,
+            "status": Pedido.STATUS_PENDENTE,
+            "total": _total_pedido(produtos_rows),
+        }), 201
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route("/api/pedidos/<int:pedido_id>/status", methods=["PUT"])
+def atualizar_status(pedido_id):
+    try:
+        data = request.json or {}
+        novo_status = data.get("status")
+
+        if not novo_status:
+            return jsonify({"error": "Status é obrigatório"}), 400
+
+        pedido_rows = supabase.table("pedidos").select("id,cliente,status").eq("id", pedido_id).execute().data or []
+        if not pedido_rows:
+            return jsonify({"error": "Pedido não encontrado"}), 404
+
+        pedido_row = pedido_rows[0]
+        status_anterior = pedido_row["status"]
+        data_alteracao = now_str()
+
+        update_payload = {"status": novo_status}
+        if novo_status in STATUS_FINALIZADOS:
+            update_payload["data_finalizacao"] = data_alteracao
+
+        supabase.table("pedidos").update(update_payload).eq("id", pedido_id).execute()
+
+        supabase.table("historico").insert({
+            "pedido_id": pedido_id,
+            "status": novo_status,
+            "data": data_alteracao,
+            "observacoes": f"Status alterado de {status_anterior} para {novo_status}",
+        }).execute()
+
+        produtos_rows = _get_produtos_do_pedido(pedido_id)
+        _notificar_observadores(pedido_id, pedido_row["cliente"], novo_status, produtos_rows)
+
+        return jsonify({
+            "message": "Status atualizado com sucesso",
+            "pedido_id": pedido_id,
+            "status_anterior": status_anterior,
+            "status_novo": novo_status,
+            "movido_para_historico": novo_status in STATUS_FINALIZADOS,
         })
-    
-    return jsonify({
-        'message': 'Status atualizado com sucesso',
-        'pedido_id': pedido_id,
-        'status_anterior': status_anterior,
-        'status_novo': novo_status,
-        'movido_para_historico': False
-    })
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
-@app.route('/api/pedidos/<int:pedido_id>', methods=['GET'])
+@app.route("/api/pedidos/<int:pedido_id>", methods=["GET"])
 def get_pedido_detalhes(pedido_id):
-    #retorna os detalhes de um pedido específico, seja ativo ou finalizado
-    # Verificar primeiro nos pedidos ativos
-    if pedido_id in pedidos_ativos:
-        pedido_data = pedidos_ativos[pedido_id]
-        pedido = pedido_data['pedido']
-        tipo = 'ativo'
-    elif pedido_id in pedidos_finalizados:
-        pedido_data = pedidos_finalizados[pedido_id]
-        pedido = pedido_data['pedido']
-        tipo = 'finalizado'
-    else:
-        return jsonify({'error': 'Pedido não encontrado'}), 404
-    
-    detalhes = {
-        'id': pedido.id,
-        'cliente': pedido.cliente,
-        'status': pedido.status,
-        'total': pedido.calcular_total(),
-        'produtos': [{'nome': p.nome, 'preco': p.preco} for p in pedido.produtos],
-        'historico': pedido_data['historico'],
-        'tipo': tipo,
-        'data_criacao': pedido_data.get('data_criacao', 'N/A'),
-        'data_finalizacao': pedido_data.get('data_finalizacao', 'N/A') if tipo == 'finalizado' else None
-    }
-    
-    return jsonify(detalhes)
+    try:
+        pedido_rows = (
+            supabase.table("pedidos")
+            .select("id,cliente,status,data_criacao,data_finalizacao")
+            .eq("id", pedido_id)
+            .execute()
+            .data
+            or []
+        )
+        if not pedido_rows:
+            return jsonify({"error": "Pedido não encontrado"}), 404
 
-@app.route('/api/estatisticas', methods=['GET'])
+        pedido = pedido_rows[0]
+        produtos = _get_produtos_do_pedido(pedido_id)
+
+        hist = (
+            supabase.table("historico")
+            .select("status,data,observacoes")
+            .eq("pedido_id", pedido_id)
+            .order("id")
+            .execute()
+            .data
+            or []
+        )
+
+        tipo = "finalizado" if pedido["status"] in STATUS_FINALIZADOS else "ativo"
+
+        return jsonify({
+            "id": pedido["id"],
+            "cliente": pedido["cliente"],
+            "status": pedido["status"],
+            "total": _total_pedido(produtos),
+            "produtos": [{"nome": p["nome"], "preco": _to_float(p["preco"])} for p in produtos],
+            "historico": hist,
+            "tipo": tipo,
+            "data_criacao": pedido.get("data_criacao"),
+            "data_finalizacao": pedido.get("data_finalizacao"),
+        })
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route("/api/estatisticas", methods=["GET"])
 def get_estatisticas():
-    #retorna estatísticas básicas sobre os pedidos
-    total_pedidos = len(pedidos_ativos) + len(pedidos_finalizados)
-    pedidos_entregues = sum(1 for p in pedidos_finalizados.values() 
-                          if p['pedido'].status == Pedido.STATUS_ENTREGUE)
-    pedidos_cancelados = sum(1 for p in pedidos_finalizados.values() 
-                           if p['pedido'].status == Pedido.STATUS_CANCELADO)
-    
-    # Calcular valor total vendido (apenas pedidos entregues)
-    valor_total_vendido = sum(p['pedido'].calcular_total() 
-                            for p in pedidos_finalizados.values() 
-                            if p['pedido'].status == Pedido.STATUS_ENTREGUE)
-    
-    return jsonify({
-        'pedidos_ativos': len(pedidos_ativos),
-        'pedidos_finalizados': len(pedidos_finalizados),
-        'pedidos_entregues': pedidos_entregues,
-        'pedidos_cancelados': pedidos_cancelados,
-        'total_pedidos': total_pedidos,
-        'valor_total_vendido': valor_total_vendido,
-        'taxa_entrega': (pedidos_entregues / max(total_pedidos, 1)) * 100
-    })
+    try:
+        all_pedidos = supabase.table("pedidos").select("id,status").execute().data or []
+        total_pedidos = len(all_pedidos)
+        pedidos_entregues_ids = [p["id"] for p in all_pedidos if p["status"] == Pedido.STATUS_ENTREGUE]
+        pedidos_cancelados = sum(1 for p in all_pedidos if p["status"] == Pedido.STATUS_CANCELADO)
+        pedidos_finalizados = sum(1 for p in all_pedidos if p["status"] in STATUS_FINALIZADOS)
+        pedidos_ativos = total_pedidos - pedidos_finalizados
 
-@app.route('/api/notificacoes', methods=['GET'])
+        valor_total_vendido = 0.0
+        for pid in pedidos_entregues_ids:
+            valor_total_vendido += _total_pedido(_get_produtos_do_pedido(pid))
+
+        return jsonify({
+            "pedidos_ativos": pedidos_ativos,
+            "pedidos_finalizados": pedidos_finalizados,
+            "pedidos_entregues": len(pedidos_entregues_ids),
+            "pedidos_cancelados": pedidos_cancelados,
+            "total_pedidos": total_pedidos,
+            "valor_total_vendido": valor_total_vendido,
+            "taxa_entrega": (len(pedidos_entregues_ids) / max(total_pedidos, 1)) * 100,
+        })
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route("/api/notificacoes", methods=["GET"])
 def get_notificacoes():
-    #retorna notificações simuladas para o sistema
-    return jsonify({
-        'notificacoes': [
-            'Sistema iniciado. Aguardando pedidos...'
-        ]
-    })
+    return jsonify({"notificacoes": ["Sistema iniciado. Aguardando pedidos..."]})
 
-@app.route('/api/observadores', methods=['GET'])
+@app.route("/api/observadores", methods=["GET"])
 def get_observadores():
-    # Retorna a lista de observadores disponíveis
     return jsonify([
-        {'id': 'email', 'nome': 'Notificação por E-mail', 'descricao': 'Envia e-mails para o cliente'},
-        {'id': 'log', 'nome': 'Registro em Log', 'descricao': 'Registra todas as alterações em arquivo de log'},
-        {'id': 'tela', 'nome': 'Notificação na Tela', 'descricao': 'Exibe notificações na interface'}
+        {"id": "email", "nome": "Notificação por E-mail", "descricao": "Envia e-mails para o cliente"},
+        {"id": "log", "nome": "Registro em Log", "descricao": "Registra todas as alterações em arquivo de log"},
+        {"id": "tela", "nome": "Notificação na Tela", "descricao": "Exibe notificações na interface"},
     ])
 
-if __name__ == '__main__':
-    
+if __name__ == "__main__":
     print("SISTEMA DE GERENCIAMENTO DE PEDIDOS - INTERFACE WEB")
     print("Servidor iniciado em: http://localhost:5000")
-    print("Acesse o navegador e abra o endereço acima")
-   
-    
     app.run(debug=True, port=5000)
