@@ -5,23 +5,32 @@
     box-sizing: border-box;
 }
 
+@import url('https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700&display=swap');
+
 :root {
-    --primary-color: #4361ee;
-    --secondary-color: #3f37c9;
-    --success-color: #4cc9f0;
-    --warning-color: #f72585;
-    --danger-color: #7209b7;
-    --light-color: #f8f9fa;
-    --dark-color: #212529;
-    --gray-color: #6c757d;
-    --border-color: #dee2e6;
+    --primary-color: #3f5efb;
+    --secondary-color: #2d3bd6;
+    --success-color: #35c9a6;
+    --warning-color: #f59f0b;
+    --danger-color: #e03131;
+    --light-color: #f8f9fb;
+    --dark-color: #1f2430;
+    --gray-color: #6c7a89;
+    --border-color: #e3e8ef;
     --card-bg: #ffffff;
     --body-bg: #f5f7fb;
+    --shadow-sm: 0 6px 16px rgba(16, 24, 40, 0.08);
+    --shadow-md: 0 12px 28px rgba(16, 24, 40, 0.12);
+    --shadow-lg: 0 18px 48px rgba(16, 24, 40, 0.18);
+    --ring: 0 0 0 3px rgba(63, 94, 251, 0.18);
 }
 
 body {
-    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-    background-color: var(--body-bg);
+    font-family: 'Manrope', 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    background:
+        radial-gradient(1200px 600px at 10% -10%, rgba(63, 94, 251, 0.12), transparent 60%),
+        radial-gradient(900px 500px at 90% -20%, rgba(53, 201, 166, 0.10), transparent 60%),
+        var(--body-bg);
     color: var(--dark-color);
     line-height: 1.6;
 }
@@ -36,10 +45,10 @@ body {
 
 /* Header */
 .header {
-    background: linear-gradient(135deg, var(--primary-color), var(--secondary-color));
+    background: linear-gradient(135deg, #4057ff, #2a37c7);
     color: white;
     padding: 1.5rem;
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+    box-shadow: var(--shadow-md);
 }
 
 .logo {
@@ -84,14 +93,15 @@ body {
     border-radius: 12px;
     padding: 1.5rem;
     margin-bottom: 1.5rem;
-    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.05);
+    box-shadow: var(--shadow-sm);
     border: 1px solid var(--border-color);
-    transition: transform 0.3s ease, box-shadow 0.3s ease;
+    transition: transform 0.3s ease, box-shadow 0.3s ease, border-color 0.3s ease;
 }
 
 .card:hover {
     transform: translateY(-2px);
-    box-shadow: 0 6px 12px rgba(0, 0, 0, 0.1);
+    box-shadow: var(--shadow-md);
+    border-color: rgba(63, 94, 251, 0.25);
 }
 
 .card h3 {
@@ -126,12 +136,14 @@ body {
     justify-content: space-between;
     align-items: center;
     cursor: pointer;
-    transition: all 0.2s ease;
+    transition: transform 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease, background-color 0.2s ease;
 }
 
 .product-item:hover {
-    background-color: #e9ecef;
+    background-color: #eef1f8;
     border-color: var(--primary-color);
+    box-shadow: var(--shadow-sm);
+    transform: translateY(-2px);
 }
 
 .product-item.selected {
@@ -151,17 +163,24 @@ body {
 }
 
 .product-actions button {
-    background-color: var(--primary-color);
+    background: linear-gradient(135deg, var(--primary-color), var(--secondary-color));
     color: white;
     border: none;
     border-radius: 4px;
     padding: 0.5rem 1rem;
     cursor: pointer;
-    transition: background-color 0.2s;
+    transition: transform 0.15s ease, box-shadow 0.2s ease, filter 0.2s ease;
 }
 
 .product-actions button:hover {
-    background-color: var(--secondary-color);
+    filter: brightness(1.05);
+    box-shadow: 0 6px 14px rgba(63, 94, 251, 0.25);
+    transform: translateY(-1px);
+}
+
+.product-actions button:active {
+    transform: translateY(0);
+    filter: brightness(0.98);
 }
 
 /* Selected Products */
@@ -211,12 +230,13 @@ body {
     border: 1px solid var(--border-color);
     border-radius: 8px;
     font-size: 1rem;
-    transition: border-color 0.2s;
+    transition: border-color 0.2s ease, box-shadow 0.2s ease;
 }
 
 .form-group input[type="text"]:focus {
     outline: none;
     border-color: var(--primary-color);
+    box-shadow: var(--ring);
 }
 
 .observers-options {
@@ -269,7 +289,7 @@ body {
     font-size: 1rem;
     font-weight: 600;
     cursor: pointer;
-    transition: all 0.2s ease;
+    transition: transform 0.15s ease, box-shadow 0.2s ease, filter 0.2s ease;
     display: inline-flex;
     align-items: center;
     justify-content: center;
@@ -277,22 +297,45 @@ body {
 }
 
 .btn-primary {
-    background-color: var(--primary-color);
+    background: linear-gradient(135deg, var(--primary-color), var(--secondary-color));
     color: white;
     width: 100%;
 }
 
 .btn-primary:hover {
-    background-color: var(--secondary-color);
+    filter: brightness(1.05);
+    box-shadow: 0 10px 24px rgba(63, 94, 251, 0.28);
+    transform: translateY(-1px);
+}
+
+.btn-primary:active {
+    transform: translateY(0);
+    filter: brightness(0.98);
 }
 
 .btn-secondary {
-    background-color: var(--gray-color);
+    background: linear-gradient(135deg, #7a8796, #5f6c7a);
     color: white;
 }
 
 .btn-secondary:hover {
-    background-color: #5a6268;
+    filter: brightness(1.05);
+    box-shadow: 0 8px 20px rgba(122, 135, 150, 0.25);
+    transform: translateY(-1px);
+}
+
+.btn-secondary:active {
+    transform: translateY(0);
+    filter: brightness(0.98);
+}
+
+.btn:focus-visible,
+.product-actions button:focus-visible,
+.order-actions button:focus-visible,
+.status-btn:focus-visible,
+.tab-btn:focus-visible {
+    outline: none;
+    box-shadow: var(--ring);
 }
 
 /* Orders List */
@@ -310,11 +353,14 @@ body {
     display: flex;
     justify-content: space-between;
     align-items: center;
-    transition: all 0.2s ease;
+    transition: transform 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease, background-color 0.2s ease;
 }
 
 .order-item:hover {
-    background-color: #e9ecef;
+    background-color: #eef1f8;
+    border-color: var(--primary-color);
+    box-shadow: var(--shadow-sm);
+    transform: translateY(-2px);
 }
 
 .order-info h4 {
@@ -337,17 +383,24 @@ body {
 .status-cancelado { background-color: #f8d7da; color: #721c24; }
 
 .order-actions button {
-    background-color: var(--primary-color);
+    background: linear-gradient(135deg, var(--primary-color), var(--secondary-color));
     color: white;
     border: none;
     border-radius: 4px;
     padding: 0.5rem 1rem;
     cursor: pointer;
-    transition: background-color 0.2s;
+    transition: transform 0.15s ease, box-shadow 0.2s ease, filter 0.2s ease;
 }
 
 .order-actions button:hover {
-    background-color: var(--secondary-color);
+    filter: brightness(1.05);
+    box-shadow: 0 6px 14px rgba(63, 94, 251, 0.25);
+    transform: translateY(-1px);
+}
+
+.order-actions button:active {
+    transform: translateY(0);
+    filter: brightness(0.98);
 }
 
 /* Notifications */
@@ -364,6 +417,7 @@ body {
     margin-bottom: 1rem;
     display: flex;
     gap: 1rem;
+    box-shadow: 0 4px 10px rgba(16, 24, 40, 0.06);
 }
 
 .notification-icon {
@@ -453,7 +507,7 @@ body {
     border-radius: 12px;
     width: 90%;
     max-width: 500px;
-    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2);
+    box-shadow: var(--shadow-lg);
 }
 
 .modal-header {
@@ -491,7 +545,7 @@ body {
     border-radius: 8px;
     font-weight: 600;
     cursor: pointer;
-    transition: all 0.2s ease;
+    transition: transform 0.15s ease, box-shadow 0.2s ease, filter 0.2s ease;
     display: flex;
     flex-direction: column;
     align-items: center;
@@ -510,7 +564,13 @@ body {
 
 .status-btn:hover {
     transform: translateY(-2px);
-    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+    box-shadow: 0 8px 16px rgba(16, 24, 40, 0.12);
+    filter: brightness(1.02);
+}
+
+.status-btn:active {
+    transform: translateY(0);
+    filter: brightness(0.98);
 }
 
 .modal-footer {
@@ -616,6 +676,7 @@ body {
     background-color: white;
     border-bottom: 1px solid var(--border-color);
     padding: 0 1.5rem;
+    box-shadow: 0 8px 20px rgba(16, 24, 40, 0.04);
 }
 
 .tab-btn {
@@ -630,13 +691,14 @@ body {
     font-weight: 600;
     color: var(--gray-color);
     cursor: pointer;
-    transition: all 0.2s ease;
+    transition: color 0.2s ease, background-color 0.2s ease, transform 0.15s ease;
     position: relative;
 }
 
 .tab-btn:hover {
     color: var(--primary-color);
-    background-color: #f8f9fa;
+    background-color: #f4f6fb;
+    transform: translateY(-1px);
 }
 
 .tab-btn.active {
